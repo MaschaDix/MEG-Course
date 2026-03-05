@@ -1,0 +1,262 @@
+#########################################################
+######### ENRICHMENT ANALYSIS AND VISUALIZATION #########
+#########################################################
+
+library(topGO)
+
+# 1. Run topGO to obtain gene ontology enrichment for each set:
+
+setwd("/Users/dixmf/Documents/Courses/Marine Ecological Genomics/Transcriptomics/go_annot")
+
+folders <- list.files("./genes_of_interest")
+folders
+
+for (i in 1:length(folders)) {
+  # first, we specify which folder we want to start with (the first one in our list of folders)
+  folder_of_interest = file.path("./genes_of_interest", folders[i],"")
+  
+  # list all the files in the folder
+  # there is actually only one file, so it's slightly unnecessary, but it becomes useful later!
+  mult_files = list.files(folder_of_interest, pattern="*.txt")
+  
+  # we start our first nested for loop, specifying the 3 different Ontology categories
+  for (go_category in c('bp','cc','mf')) {
+    
+    # first we point it to the reference file we want to use
+    annot_filename='./aip_prot_no_duplication.tsv'
+    
+    # telling it to map the genes to the GO annotation
+    gene_id_to_go = readMappings(file = annot_filename)
+    
+    # removing anything that had no hit
+    gene_id_to_go = gene_id_to_go[gene_id_to_go != 'no_hit']
+    
+    # keep the gene names
+    gene_names = names(gene_id_to_go)
+    
+    for (m in mult_files) {
+      print(paste("Current file:", m))
+      genes_of_interest_filename = paste0(folder_of_interest, m)
+      genes_of_interest = scan(genes_of_interest_filename, character(0), sep="\n")
+      
+      genelist = factor(as.integer(gene_names %in% genes_of_interest))
+      names(genelist) = gene_names
+      
+      GOdata = try(new("topGOdata", ontology=toupper(go_category), allGenes=genelist, gene2GO=gene_id_to_go, annotationFun=annFUN.gene2GO))
+      
+      # handle error
+      if (class(GOdata) == "try-error") {
+        print (paste0("Error for file", m, "!"))
+        next
+      }
+      
+      # weight01 is the default algorithm used in Alexa et al. (2006)
+      weight01.fisher <- runTest(GOdata, statistic = "fisher")
+      
+      # generate a results table (for only the top 1000 GO terms)
+      #   topNodes: highest 1000 GO terms shown
+      #   numChar: truncates GO term descriptions at 1000 chars (basically, disables truncation)
+      results_table = GenTable(GOdata, P_value=weight01.fisher, orderBy="P_value", topNodes=1000, numChar=1000)
+      
+      # write it out into a file for python post-processing
+      output_filename = paste0("./topGO_output/", folders[i], "/", go_category, "_", m)
+      write.table(results_table, file=output_filename, quote=FALSE, sep='\t')
+    }
+  }
+}
+
+
+
+# 2. Visualize the topGO output
+
+library(ggplot2)
+library(dplyr)
+
+folders <- list.files("./topGO_output")
+folders
+
+# 2.1 Bubbleplots
+for (i in 1:length(folders)) {
+  
+  # first, we specify which folder we want to start with (the first one in our list of folders)
+  folder_of_interest <- file.path("./topGO_output", folders[i], "")
+  
+  # list all the files in the folder
+  mult_files <- list.files(folder_of_interest, pattern="*.txt")
+  
+  # time for our first nested loop, we basically want to go file by file (bp, cc, mf)
+  for (output_file in mult_files) {
+    
+    # Read the result file
+    results_table <- read.table(paste0(folder_of_interest, output_file), header = TRUE, sep = "\t", stringsAsFactors = FALSE, quote="", fill=TRUE)
+    
+    # Convert P_value to numeric and filter by p-value < 0.05
+    results_table$P_value <- as.numeric(results_table$P_value)
+    results_table <- results_table[!is.na(results_table$P_value) & results_table$P_value < 0.05, ]
+    
+    # let's only keep the 15 most significant GO terms
+    results_table <- head(results_table, n = 20)
+    
+    # Generate dot plot using ggplot
+    print(
+      # ggplot(results_table, aes(x = Term, y = -log10(as.numeric(P_value)), size = as.numeric(Significant/Annotated))) +
+      ggplot(results_table, aes(x = Term, y = as.numeric(Significant/Annotated), size = Annotated, color = -log10(as.numeric(P_value)))) +
+      geom_point() +
+      scale_color_gradient(low = "yellow", high = "red") +
+      theme_minimal() +
+      coord_flip() +
+      labs(title = paste("GO Term Enrichment:", output_file), 
+           y = "Significant/Annotated ratio", x = "GO Term",
+           size = "Annotated", fill = "-log10 of p-value") +
+      theme(plot.title = element_text(hjust = 0.5))
+    )
+    
+    # Save plot as PDF
+    # ggsave(filename = paste0("./topGO_output/", folders[i], "/", folders[i], "_bubble.pdf"), 
+    #       width = 8, height = 20) # adjust width and height
+  }
+}
+
+
+# 2.2 Bar plots with BP, CC and MF
+# !! this is ChatGPT code (although based on the previous loop, and edited to my preference)
+
+for (folder in folders) {
+  
+  # this is pretty much as before, it just changed the name of mult_files to files
+  folder_path <- file.path("./topGO_output", folder)
+  files <- list.files(folder_path, pattern = "*.txt", full.names = TRUE)
+  
+  # now we are creating an empty data frame to fill with our results from the upcoming nested for loop
+  combined_results <- data.frame()
+  
+  for (file in files) {
+    
+    # we start by reading the first file
+    results_table <- read.table(
+      file,
+      header = TRUE, sep = "\t",
+      stringsAsFactors = FALSE, quote = "", fill = TRUE
+    )
+    
+    # make sure the p-values are numeric
+    results_table$P_value <- as.numeric(results_table$P_value)
+    
+    # now we are using the dplyr package, ChatGPT loves this one (and so do many users tbf).
+    # Basically, the %>% is like a pipe, so rather than nesting functions within each other as you
+    # do in the base R language, you can specify one function, then "pipe" the output into the next function. 
+    results_table <- results_table %>%
+      filter(!is.na(P_value), P_value < 0.05) %>%   # ChatGPT wants to make sure there are no NAs, we can keep it because it's good practice
+      # arrange(P_value) %>%                    # ChatGPT wants us to sort the p-value, but it is already in an increasing order
+      head(10)
+    
+    # Assign ontology based on filename
+    # we are using a pattern search (grepl) together with an if loop. 
+    if (grepl("^bp_", basename(file))) {
+      results_table$Ontology <- "Biological process"
+    } else if (grepl("^cc_", basename(file))) {
+      results_table$Ontology <- "Cellular component"
+    } else if (grepl("^mf_", basename(file))) {
+      results_table$Ontology <- "Molecular function"
+    }
+    
+    # here we are using rbind to add our just obtained results into the combiend_results data frame
+    combined_results <- rbind(combined_results, results_table)
+  } # this means our nested for loop is over!
+  
+  # Order terms by ontology + significance
+  combined_results <- combined_results %>%
+    mutate(logP = -log10(P_value)) %>% # turn p-values into -log10 so that they get bigger, it's more intuitive for plots
+    arrange(Ontology, logP)
+  
+  # make the Ontology terms into factors, this is often required for ggplot to work properly
+  combined_results$Term <- factor(
+    combined_results$Term,
+    levels = combined_results$Term
+  )
+  
+  print(
+    ggplot(combined_results,
+           aes(x = Term,
+               y = logP,
+               fill = Ontology)) +
+      geom_col() +
+      coord_flip() +
+      theme_minimal() +
+      labs(title = paste("GO functional analysis -", folder),
+           x = "GO term",
+           y = "-log10(P-value)",
+           fill = "") +
+      scale_fill_manual(values = c(
+        "Biological process" = "red3",
+        "Cellular component" = "steelblue",
+        "Molecular function" = "forestgreen"
+      )) +
+      theme(plot.title = element_text(hjust = 0.5))
+  )
+  
+  # Optional save
+  # ggsave(filename = paste0("./topGO_output/", folder, "/GO_barplot_", folder, ".pdf"),
+  #        width = 8, height = 10)
+}
+
+
+
+
+# 3. Summarise GO terms by semantic similarity (basically group them into higher level terms)
+# GO hierarchy explanation: https://geneontology.org/docs/ontology-documentation/
+
+library(rrvgo)
+# BiocManager::install("org.Dm.eg.db")
+library(org.Dm.eg.db)
+
+# Set your working directory to where "topGO_output" is located
+base_dir <- "./topGO_output"
+folders <- list.dirs(base_dir, recursive = FALSE)
+
+# creating the output folder
+figure_dir <- "figures_rrvgo_BP_Dm"
+dir.create(figure_dir, showWarnings = FALSE)
+
+
+for (folder in folders) {
+  # List only BP txt files in this folder.
+  bp_file <- list.files(folder, pattern = "bp_.*\\.txt$", full.names = TRUE)
+  
+  # just get the name without the file type
+  sample_name <- tools::file_path_sans_ext(basename(bp_file))      
+  
+  # print out which sample we're working on'
+  message("Processing file: ", bp_file)
+    
+  # Read GO enrichment file
+  go_table <- try(read.delim(bp_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE))
+
+  # Filter significant terms (p < 0.05) and keep only the GO ID and p-value
+  sig_go <- go_table[as.numeric(go_table$P_value) < 0.05, c("GO.ID", "P_value")]
+    
+  # Calculate similarity matrix
+  simMatrix <- calculateSimMatrix(sig_go$GO.ID,
+                                    orgdb = "org.Dm.eg.db", # we need to decide which reference organism we want
+                                    ont = "BP",
+                                    method = "Rel" # which distance method
+                                  )
+    
+  # Assign the GO IDs to the respective p-values
+  scores <- setNames(-log10(sig_go$P_value), sig_go$GO.ID)
+    
+  # Reduce and group similar terms
+  reducedTerms <- reduceSimMatrix(simMatrix,
+                                    scores = scores,
+                                    threshold = 0.7,
+                                    orgdb = "org.Dm.eg.db")
+  colnames(reducedTerms)[1] <- "category"
+    
+  # Plot treemap
+  pdf_filename <- file.path(figure_dir, paste0("treemap_", sample_name, ".pdf"))
+  pdf(pdf_filename, width = 8, height = 3)
+  treemapPlot(reducedTerms, force.print.labels = TRUE, labelSize=10)
+  dev.off()
+    
+  message("Treemap saved to: ", pdf_filename)
+}
