@@ -1,0 +1,35 @@
+# a quick intro to for loops:
+
+# creating a dataset of random values
+my_data <- data.frame(Treatment = c(rep("Heat", 5), rep("Cold", 5), rep("Control", 5)),
+                      Numbers = sample(100, 15))
+
+# let's say we want to get the mean and standard deviation for each treatment and record them.
+# Manually this is annoying. We need to repeat this for each treatment. Then we also need to 
+# write this down somewhere
+mean(my_data$Numbers[my_data$Treatment == "Heat"])
+sd(my_data$Numbers[my_data$Treatment == "Heat"])
+
+# let's use a for loop instead:
+for (treat in unique(my_data$Treatment)) {
+  print(
+    mean(my_data$Numbers[my_data$Treatment == treat])
+    )
+  print(
+    sd(my_data$Numbers[my_data$Treatment == treat])
+    )
+}
+
+# but just printing this to the console is also not very efficient
+# we can make an empty matrix
+my_mat <- matrix(NA, nrow = 3, ncol = 2)
+rownames(my_mat) <- c("Heat", "Cold", "Control")
+colnames(my_mat) <- c("Mean", "SD")
+my_mat
+
+treats <- unique(my_data$Treatment)
+
+for (i in 1:length(treats)) {
+  my_mat[i, 1] <- mean(my_data$Numbers[my_data$Treatment == treats[i]])
+  my_mat[i, 2] <- sd(my_data$Numbers[my_data$Treatment == treats[i]])
+}
