@@ -1,0 +1,52 @@
+###########################
+######### SLEUTH #########
+###########################
+
+library(sleuth)
+
+# 1. Set the base dir, wd, folders
+base_dir <- "/Users/dixmf/Documents/Courses/Marine Ecological Genomics/Transcriptomics/Sleuth"
+setwd(base_dir)
+
+folders <- list.files()[c(1:2, 4:5)]
+
+# 2. Run a loop for the Sleuth analysis
+for (folder in folders) {
+  
+  # because in the SciAdv folder we have 12 samples instead of 6 we need to grab the 
+  # sample names and condition from the folders instead of specifying the manually
+  samples <- list.files(folder)
+  condition <- ifelse(grepl("^Apo", samples), "Apo", "Sym")
+  
+  # build metadata table:
+  s2c <- data.frame(
+    sample = samples,
+    path = file.path(folder,
+                     samples),
+    condition = condition,
+    stringsAsFactors = FALSE)
+
+  # initialise sleuth object:
+  so <- sleuth_prep(s2c, extra_bootstrap_summary = TRUE)
+  
+  # Fit full model (condition as explanatory variable)
+  so <- sleuth_fit(so, ~condition, "full")
+  
+  # Fit reduced model (intercept only)
+  so <- sleuth_fit(so, ~1, "reduced")
+  
+  # Wald test: effect size for treatment vs control
+  so <- sleuth_wt(so,
+                  which_beta  = "conditionSym",
+                  which_model = "full")
+  
+  # make results tables, one with only significant outputs
+  wt <- sleuth_results(so, "conditionSym")
+  wt_sig <- dplyr::filter(wt, qval <= 0.05)
+  
+  # save the results as CSV
+  file_path1 <- file.path(base_dir, "/Output/", paste0(folder, "_Wald.csv"))
+  file_path2 <- file.path(base_dir, "/Output/", paste0(folder, "_Wald_SigOnly.csv"))
+  write.csv(wt, file = file_path1)
+  write.csv(wt_sig, file = file_path2)
+}
