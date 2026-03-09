@@ -1,0 +1,23 @@
+install.packages("ggVennDiagram")
+library(ggVennDiagram)
+BiocManager::install("htSeqTools")
+library(htSeqTools)
+
+setwd('/Users/dixmf/Documents/Courses/Marine Ecological Genomics/Transcriptomics/meta_analysis/go_annot/genes_of_interest')
+
+MethA <- read.delim("MethodA_all/MethodA_all.txt", header = FALSE)
+MethB <- read.delim("MethodB_all/MethodB_all.txt", header = FALSE)
+MethC <- read.delim("MethodC_all/MethodC_all.txt", header = FALSE)
+
+All <- list(MethA = MethA$V1,
+            MethB = MethB$V1,
+            MethC = MethC$V1)
+
+ggVennDiagram(All, label_alpha = 0, 
+             set_color = "#404040", 
+             label_font = "serif",
+             edge_size = 0.5) +  
+  scale_fill_gradient(low="white", high = "red")
+
+overlaps_AB <- intersect(MethA$V1, MethB$V1)
+overlaps_all <- listOverlap(MethA$V1, MethB$V1, MethC$V1)
